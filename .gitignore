@@ -1,0 +1,17 @@
+# Claude Code 세션/메모리 데이터
+.claude/
+
+# OS 생성 파일
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# 에디터
+.vscode/
+.idea/
+*.swp
+
+# 임시 파일
+_*.js
+*.log
