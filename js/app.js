@@ -252,7 +252,11 @@
   }
   function toggleTheme() { applyTheme(currentTheme() === "dark" ? "light" : "dark"); }
 
-  /* ---------- 라우팅 ---------- */
+  /* ---------- 라우팅 + 브라우저 히스토리 연동 ----------
+     SPA라서 기본 상태로는 모바일 '뒤로가기'가 사이트를 통째로 종료시킵니다.
+     화면을 이동할 때마다 history에 항목을 쌓고(popstate로 되돌림), 뒤로가기가
+     앱 안에서 이전 화면으로 이동하도록 만듭니다. 홈에서 뒤로가기를 누를 때만
+     (정상적으로) 사이트를 벗어납니다. */
   function render(view) {
     stopSpeaking();
     clear(appEl);
@@ -260,10 +264,59 @@
     window.scrollTo(0, 0);
   }
 
+  var navStack = [];      // navStack[i] = 화면을 그리는 thunk
+  var navIndex = 0;
+
+  function renderAt(i) {
+    var thunk = navStack[i];
+    if (thunk) render(thunk());
+  }
+
+  // 새 화면으로 이동(앞으로 쌓기)
+  function pushScreen(thunk) {
+    navStack = navStack.slice(0, navIndex + 1);
+    navStack.push(thunk);
+    navIndex = navStack.length - 1;
+    try { history.pushState({ i: navIndex }, ""); } catch (e) {}
+    render(thunk());
+  }
+
+  // 현재 화면을 교체(히스토리 항목 추가 없이) — 퀴즈 → 결과처럼 되돌아갈 필요 없는 전환
+  function replaceScreen(thunk) {
+    navStack[navIndex] = thunk;
+    try { history.replaceState({ i: navIndex }, ""); } catch (e) {}
+    render(thunk());
+  }
+
+  // 홈으로: 쌓인 만큼 뒤로 되감아 루트(홈)로
+  function goHome() {
+    if (navIndex > 0 && window.history) { history.go(-navIndex); }
+    else { replaceScreen(function () { return renderHome(); }); }
+  }
+
+  // 한 단계 뒤로 (브라우저 뒤로가기와 동일)
+  function navBack() {
+    if (navIndex > 0 && window.history) { history.back(); }
+    else { goHome(); }
+  }
+
+  window.addEventListener("popstate", function (e) {
+    var i = (e.state && typeof e.state.i === "number") ? e.state.i : 0;
+    if (i < 0) i = 0;
+    if (i > navStack.length - 1) i = navStack.length - 1;
+    navIndex = i;
+    renderAt(i);
+  });
+
   function go(route) {
-    if (route.screen === "home") render(renderHome());
-    else if (route.screen === "lesson") render(renderLesson(route.day));
-    else if (route.screen === "quiz") render(renderLessonQuiz(route.day));
+    if (route.screen === "home") goHome();
+    else if (route.screen === "lesson") {
+      var ld = route.day;
+      pushScreen(function () { return renderLesson(ld); });
+    } else if (route.screen === "quiz") {
+      var qd = route.day;
+      pushScreen(function () { return renderLessonQuiz(qd); });
+    }
   }
 
   /* ---------- 홈 화면 ---------- */
@@ -298,7 +351,7 @@
       reviewGrid.appendChild(el("button", {
         class: "review-card",
         attrs: { type: "button" },
-        on: { click: function () { render(renderReviewScope(t.key)); } }
+        on: { click: function () { var k = t.key; pushScreen(function () { return renderReviewScope(k); }); } }
       }, [
         el("span", { class: "review-card__icon", text: t.icon }),
         el("span", { class: "review-card__label", text: t.label }),
@@ -467,11 +520,12 @@
       sectionHost.appendChild(card);
 
       clear(navRow);
+      // 1교시(첫 스텝)에서 '이전'을 누르면 홈으로, 그 외엔 이전 교시로
       var prevBtn = el("button", {
         class: "btn btn--ghost",
-        attrs: step === 0 ? { type: "button", disabled: "disabled" } : { type: "button" },
-        text: "← 이전",
-        on: { click: function () { if (step > 0) { step--; paint(); } } }
+        attrs: { type: "button" },
+        text: step === 0 ? "← 홈으로" : "← 이전",
+        on: { click: function () { if (step > 0) { step--; paint(); } else { goHome(); } } }
       });
       navRow.appendChild(prevBtn);
 
@@ -599,14 +653,13 @@
       });
 
       var navRow = el("div", { class: "nav-row" });
-      if (idx > 0) {
-        navRow.appendChild(el("button", {
-          class: "btn btn--ghost",
-          attrs: { type: "button" },
-          text: "← 이전",
-          on: { click: function () { idx--; paintQuestion(); } }
-        }));
-      }
+      // 첫 문제에서 '이전'은 이전 화면(수업/복습 범위)으로, 그 외엔 이전 문제로
+      navRow.appendChild(el("button", {
+        class: "btn btn--ghost",
+        attrs: { type: "button" },
+        text: idx > 0 ? "← 이전" : "← 나가기",
+        on: { click: function () { if (idx > 0) { idx--; paintQuestion(); } else { navBack(); } } }
+      }));
       navRow.appendChild(nextBtn);
       card.appendChild(navRow);
 
@@ -653,15 +706,18 @@
       onComplete: function (g) {
         recordResult(day, g.score);
         var nextDay = day + 1, hasNext = !!window.LESSONS[nextDay];
-        render(renderResult(g, {
-          best: progress.scores[day],
-          actions: [
-            { label: "다시 풀기", kind: "ghost", onClick: function () { go({ screen: "quiz", day: day }); } },
-            { label: "홈으로", kind: "ghost", onClick: function () { go({ screen: "home" }); } },
-            { label: hasNext ? (nextDay + "일차로 →") : "다음 일차 준비 중", kind: "primary",
-              disabled: !hasNext, onClick: hasNext ? function () { go({ screen: "lesson", day: nextDay }); } : null }
-          ]
-        }));
+        // 결과는 퀴즈 화면을 '교체'(뒤로가기 시 끝난 퀴즈로 안 돌아가고 수업으로)
+        replaceScreen(function () {
+          return renderResult(g, {
+            best: progress.scores[day],
+            actions: [
+              { label: "다시 풀기", kind: "ghost", onClick: function () { go({ screen: "quiz", day: day }); } },
+              { label: "홈으로", kind: "ghost", onClick: function () { goHome(); } },
+              { label: hasNext ? (nextDay + "일차로 →") : "다음 일차 준비 중", kind: "primary",
+                disabled: !hasNext, onClick: hasNext ? function () { go({ screen: "lesson", day: nextDay }); } : null }
+            ]
+          });
+        });
       }
     });
   }
@@ -926,7 +982,7 @@
     var questions = buildReviewQuestions(type, days);
 
     if (!questions.length) {
-      render(renderReviewEmpty(type, days));
+      pushScreen(function () { return renderReviewEmpty(type, days); });
       return;
     }
 
@@ -934,20 +990,24 @@
       ? (days[0] + "회차")
       : (days[0] + "~" + days[days.length - 1] + "회차");
 
-    render(makeQuizScreen({
-      questions: questions,
-      headerTitle: meta.label + " · " + label,
-      onComplete: function (g) {
-        render(renderResult(g, {
-          best: null,
-          actions: [
-            { label: "다시 풀기", kind: "ghost", onClick: function () { startReview(type, days); } },
-            { label: "홈으로", kind: "ghost", onClick: function () { go({ screen: "home" }); } },
-            { label: "복습 범위 다시 선택", kind: "primary", onClick: function () { render(renderReviewScope(type)); } }
-          ]
-        }));
-      }
-    }));
+    pushScreen(function () {
+      return makeQuizScreen({
+        questions: questions,
+        headerTitle: meta.label + " · " + label,
+        onComplete: function (g) {
+          replaceScreen(function () {
+            return renderResult(g, {
+              best: null,
+              actions: [
+                { label: "다시 풀기", kind: "ghost", onClick: function () { startReview(type, days); } },
+                { label: "홈으로", kind: "ghost", onClick: function () { goHome(); } },
+                { label: "복습 범위 다시 선택", kind: "primary", onClick: function () { pushScreen(function () { return renderReviewScope(type); }); } }
+              ]
+            });
+          });
+        }
+      });
+    });
   }
 
   function renderReviewEmpty(type, days) {
@@ -955,7 +1015,7 @@
     var wrap = el("div", { class: "screen screen--scope" });
     wrap.appendChild(el("button", {
       class: "link-back", attrs: { type: "button" }, text: "← 뒤로",
-      on: { click: function () { render(renderReviewScope(type)); } }
+      on: { click: function () { navBack(); } }
     }));
     wrap.appendChild(el("h1", { class: "scope-title", text: meta.icon + " " + meta.label }));
     wrap.appendChild(el("div", { class: "card scope-empty" }, [
@@ -976,6 +1036,11 @@
   /* ---------- 부팅 ---------- */
   var days = Array.isArray(window.LESSON_DAYS) ? window.LESSON_DAYS.slice() : [];
   loadLessonScripts(days).then(function () {
-    go({ screen: "home" });
+    // 홈을 히스토리 루트(i=0)로 설정. 이후 화면 이동은 pushState로 쌓여,
+    // 뒤로가기가 앱 내부 이동이 되고 홈에서만 사이트를 벗어납니다.
+    navStack = [function () { return renderHome(); }];
+    navIndex = 0;
+    try { history.replaceState({ i: 0 }, ""); } catch (e) {}
+    render(renderHome());
   });
 })();
