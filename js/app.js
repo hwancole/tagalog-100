@@ -575,6 +575,9 @@
 
     var idx = 0;
     var userAnswers = new Array(questions.length).fill(null);
+    // 객관식 보기 표시 순서(문제별 1회 셔플). 같은 세션 내 재방문 시엔 고정,
+    // '다시 풀기'로 새 세션이 시작되면 새로 섞입니다. 정답은 원래 인덱스로 추적.
+    var optOrders = new Array(questions.length).fill(null);
 
     var wrap = el("div", { class: "screen screen--quiz" });
 
@@ -605,16 +608,21 @@
       }
 
       if (q.type === "choice") {
+        // 보기 표시 순서를 셔플(문제별 최초 1회). order[표시위치] = 원래 인덱스.
+        if (!optOrders[idx]) {
+          optOrders[idx] = shuffle(q.options.map(function (_, i) { return i; }));
+        }
+        var order = optOrders[idx];
         var optWrap = el("div", { class: "options" });
-        q.options.forEach(function (opt, oi) {
+        order.forEach(function (origIdx) {
           var b = el("button", {
-            class: "option" + (userAnswers[idx] === oi ? " option--selected" : ""),
+            class: "option" + (userAnswers[idx] === origIdx ? " option--selected" : ""),
             attrs: { type: "button" },
-            html: mdInline(opt),
+            html: mdInline(q.options[origIdx]),
             on: { click: function () {
-              userAnswers[idx] = oi;
+              userAnswers[idx] = origIdx; // 항상 원래 인덱스로 저장 → 채점 로직 그대로
               Array.prototype.forEach.call(optWrap.children, function (c, ci) {
-                c.className = "option" + (ci === oi ? " option--selected" : "");
+                c.className = "option" + (order[ci] === origIdx ? " option--selected" : "");
               });
               refreshNext();
             } }
