@@ -31,7 +31,7 @@ window.LESSONS[1] = {
           ["kayo", "당신들 / 당신(존칭)", "까요"],
           ["sila", "그들", "실라"]
         ] },
-        { type: "tip", text: "포인트 두 개. 첫째, siya는 he/she 구분이 없습니다(필리핀 사람들이 영어 할 때 he/she 헷갈리는 이유). 둘째, kami vs tayo — 아내에게 \"Kumain kami\"라고 하면 \"(당신 빼고) 우리끼리 먹었어\"라는 뜻이 돼버립니다. 같이 먹었으면 tayo!" },
+        { type: "tip", text: "포인트 두 개. 첫째, siya는 he/she 구분이 없습니다(필리핀 사람들이 영어 할 때 he/she 헷갈리는 이유). 둘째, kami vs tayo — 현지인에게 \"Kumain kami\"라고 하면 \"(당신 빼고) 우리끼리 먹었어\"라는 뜻이 돼버립니다. 같이 먹었으면 tayo!" },
         { type: "p", text: "그리고 마법의 문장 패턴 하나: **[형용사/명사] + 대명사** = 완성된 문장입니다. 영어의 be동사(am/is/are)가 아예 없어서, 단어 두 개면 문장이 됩니다." },
         { type: "examples", items: [
           { tl: "Gutom ako.", ko: "나 배고파. (구똠 아꼬 — gutom 배고픈)" },
@@ -60,15 +60,15 @@ window.LESSONS[1] = {
       ]
     },
     {
-      title: "4교시. 아내 미션 (오늘 저녁)",
+      title: "4교시. 현지인 미션 (오늘 저녁)",
       blocks: [
-        { type: "p", text: "아내 앞에서 이 세 문장을 실제로 사용하기:" },
+        { type: "p", text: "현지인 앞에서 이 세 문장을 실제로 사용하기:" },
         { type: "list", ordered: true, items: [
           "Gutom ako (배고플 때)",
           "Masarap! (식사하면서)",
           "Mahal kita (자기 전에)"
         ] },
-        { type: "p", text: "그리고 아내에게 발음 하나만 체크 받으세요: \"ngayon\" 발음해보고 통과하는지." }
+        { type: "p", text: "그리고 현지인에게 발음 하나만 체크 받으세요: \"ngayon\" 발음해보고 통과하는지." }
       ]
     }
   ],
@@ -80,9 +80,9 @@ window.LESSONS[1] = {
     { type: "choice", q: "Busog ako — 무슨 뜻?",
       options: ["나 배불러", "나 배고파", "나 피곤해", "나 행복해"], answer: 0,
       explain: "busog = 배부른. 반대말 gutom(배고픈)과 세트로 외우세요." },
-    { type: "choice", q: "아내와 같이 저녁을 먹고 \"우리 먹었어\"라고 할 때, 뭘 써야 할까요?",
+    { type: "choice", q: "친구와와 같이 저녁을 먹고 \"우리 먹었어\"라고 할 때, 뭘 써야 할까요?",
       options: ["Kumain tayo", "Kumain kami"], answer: 0,
-      explain: "tayo = 듣는 사람 포함 \"우리\". kami라고 하면 아내 빼고 먹었다는 뜻이 됩니다!" },
+      explain: "tayo = 듣는 사람 포함 \"우리\". kami라고 하면 친구 빼고 먹었다는 뜻이 됩니다!" },
     { type: "input", q: "\"물\"은 타갈로그어로?", answers: ["tubig"],
       explain: "tubig(뚜빅) = 물." },
     { type: "choice", q: "Mahal의 두 가지 뜻은?",

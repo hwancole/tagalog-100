@@ -137,32 +137,85 @@
     window.speechSynthesis.onvoiceschanged = function () { pickVoice(); };
   }
 
-  // 발음 재생 가능 여부: 미지원이면 false → 버튼 숨김
-  function canSpeak() { return speech.supported; }
+  // 1순위 음성: 구글 번역의 타갈로그어(tl) TTS 오디오.
+  // 실제 필리핀어 발음이라 정확하고, PC·모바일에서 동일한 음성이 납니다.
+  // (기기마다 제각각인 speechSynthesis와 달리, 모든 기기에서 같은 소리)
+  var TTS_URL = "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=tl&q=";
+  var hasAudio = typeof window.Audio !== "undefined";
+  var activeAudio = null;
+  var activeBtn = null;
 
-  function speak(text, btn) {
-    if (!speech.supported) return;
+  // 발음 버튼 표시 여부: 오디오 재생 또는 음성 합성 중 하나라도 가능하면 표시
+  function canSpeak() { return hasAudio || speech.supported; }
+
+  function setSpeaking(btn, on) {
+    if (!btn || !btn.classList) return;
+    if (on) btn.classList.add("speak-btn--speaking");
+    else btn.classList.remove("speak-btn--speaking");
+  }
+
+  function stopSpeaking() {
+    if (activeAudio) { try { activeAudio.pause(); } catch (e) {} activeAudio = null; }
+    if (speech.supported) { try { window.speechSynthesis.cancel(); } catch (e) {} }
+    if (activeBtn) { setSpeaking(activeBtn, false); activeBtn = null; }
+  }
+
+  // 2순위(폴백): 기기 내장 음성 합성. 오프라인이거나 구글 TTS가 막혔을 때만 사용.
+  function speakViaSynth(text, btn) {
+    if (!speech.supported) { setSpeaking(btn, false); if (activeBtn === btn) activeBtn = null; return; }
     try {
       window.speechSynthesis.cancel();
       var u = new SpeechSynthesisUtterance(text);
       if (speech.voice) u.voice = speech.voice;
       u.lang = speech.voice ? speech.voice.lang : "fil-PH";
       u.rate = 0.9;
-      if (btn) {
-        u.onstart = function () { btn.classList.add("speak-btn--speaking"); };
-        var off = function () { btn.classList.remove("speak-btn--speaking"); };
-        u.onend = off;
-        u.onerror = off;
-      }
+      var off = function () { setSpeaking(btn, false); if (activeBtn === btn) activeBtn = null; };
+      u.onend = off;
+      u.onerror = off;
       window.speechSynthesis.speak(u);
-    } catch (e) { /* 무시 */ }
+    } catch (e) { setSpeaking(btn, false); }
+  }
+
+  function speak(text, btn) {
+    var t = String(text == null ? "" : text).trim();
+    if (!t) return;
+    stopSpeaking();
+    activeBtn = btn || null;
+    setSpeaking(btn, true);
+
+    // 긴 문장이나 오디오 미지원 환경은 곧장 음성 합성으로
+    if (!hasAudio || t.length > 200) { speakViaSynth(t, btn); return; }
+
+    var fellBack = false;
+    function fallback() {
+      if (fellBack) return;
+      fellBack = true;
+      if (activeAudio) { activeAudio = null; }
+      speakViaSynth(t, btn);
+    }
+
+    try {
+      var audio = new Audio();
+      activeAudio = audio;
+      audio.onended = function () {
+        if (activeAudio === audio) activeAudio = null;
+        setSpeaking(btn, false);
+        if (activeBtn === btn) activeBtn = null;
+      };
+      audio.onerror = function () { fallback(); };
+      audio.src = TTS_URL + encodeURIComponent(t);
+      var p = audio.play();
+      if (p && typeof p.catch === "function") p.catch(function () { fallback(); });
+    } catch (e) {
+      fallback();
+    }
   }
 
   function makeSpeakBtn(text) {
     if (!canSpeak()) return null;
     return el("button", {
       class: "speak-btn",
-      attrs: { type: "button", "aria-label": "발음 듣기", title: "발음 듣기" },
+      attrs: { type: "button", "aria-label": "발음 듣기", title: "발음 듣기 (필리핀어)" },
       text: "🔊",
       on: { click: function () { speak(text, this); } }
     });
@@ -170,7 +223,7 @@
 
   /* ---------- 라우팅 ---------- */
   function render(view) {
-    if (speech.supported) window.speechSynthesis.cancel();
+    stopSpeaking();
     clear(appEl);
     appEl.appendChild(view);
     window.scrollTo(0, 0);
