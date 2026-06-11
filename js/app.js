@@ -153,10 +153,22 @@
   // 1순위 음성: 구글 번역의 타갈로그어(tl) TTS 오디오.
   // 실제 필리핀어 발음이라 정확하고, PC·모바일에서 동일한 음성이 납니다.
   // (기기마다 제각각인 speechSynthesis와 달리, 모든 기기에서 같은 소리)
-  var TTS_URL = "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=tl&q=";
+  // 1순위: 저장소에 미리 생성해 둔 로컬 MP3(audio/<key>.mp3) — 진짜 필리핀어 발음,
+  //         기기·네트워크 무관하게 PC·모바일 동일. (tools/gen-audio.js로 생성)
+  // 2순위: 실시간 구글 번역 TTS  3순위: 기기 음성합성
+  var AUDIO_DIR = "audio/";
+  var TTS_URL = "https://translate.googleapis.com/translate_tts?ie=UTF-8&client=gtx&tl=tl&q=";
   var hasAudio = typeof window.Audio !== "undefined";
   var activeAudio = null;
   var activeBtn = null;
+
+  // 파일명 해시 — tools/gen-audio.js의 ttsKey()와 반드시 동일 (djb2 xor, 32bit, 8 hex)
+  function ttsKey(s) {
+    var str = String(s);
+    var h = 5381;
+    for (var i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+    return ("0000000" + h.toString(16)).slice(-8);
+  }
 
   // 발음 버튼 표시 여부: 오디오 재생 또는 음성 합성 중 하나라도 가능하면 표시
   function canSpeak() { return hasAudio || speech.supported; }
@@ -199,29 +211,38 @@
     // 긴 문장이나 오디오 미지원 환경은 곧장 음성 합성으로
     if (!hasAudio || t.length > 200) { speakViaSynth(t, btn); return; }
 
-    var fellBack = false;
-    function fallback() {
-      if (fellBack) return;
-      fellBack = true;
-      if (activeAudio) { activeAudio = null; }
-      speakViaSynth(t, btn);
-    }
+    // 재생 소스 우선순위: 로컬 MP3 → 실시간 구글 TTS → (그다음은 음성합성)
+    var sources = [
+      AUDIO_DIR + ttsKey(t) + ".mp3",
+      TTS_URL + encodeURIComponent(t)
+    ];
 
-    try {
+    function tryAt(i) {
+      if (i >= sources.length) { speakViaSynth(t, btn); return; }
       var audio = new Audio();
       activeAudio = audio;
+      var advanced = false;
+      function next() {
+        if (advanced) return;
+        advanced = true;
+        if (activeAudio === audio) activeAudio = null;
+        tryAt(i + 1);
+      }
       audio.onended = function () {
+        if (advanced) return;
+        advanced = true;
         if (activeAudio === audio) activeAudio = null;
         setSpeaking(btn, false);
         if (activeBtn === btn) activeBtn = null;
       };
-      audio.onerror = function () { fallback(); };
-      audio.src = TTS_URL + encodeURIComponent(t);
-      var p = audio.play();
-      if (p && typeof p.catch === "function") p.catch(function () { fallback(); });
-    } catch (e) {
-      fallback();
+      audio.onerror = next;
+      try {
+        audio.src = sources[i];
+        var p = audio.play();
+        if (p && typeof p.catch === "function") p.catch(next);
+      } catch (e) { next(); }
     }
+    tryAt(0);
   }
 
   function makeSpeakBtn(text) {
