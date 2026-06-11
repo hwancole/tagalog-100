@@ -6,7 +6,20 @@
 
   var TOTAL_DAYS = 100;
   var STORAGE_KEY = "tagalog100";
+  var THEME_KEY = "tagalog100_theme";
   var LESSON_DIR = "lessons/";
+  var REVIEW_LIMIT = 10; // 복습 1회당 문제 수(가능한 범위 내에서)
+
+  // 복습 종류 정의 (홈 버튼 + 범위 선택 화면에서 공용)
+  var REVIEW_TYPES = [
+    { key: "word",     icon: "📚", label: "타갈로그 단어 복습", desc: "단어 → 뜻 맞히기" },
+    { key: "grammar",  icon: "🧩", label: "문법 복습",         desc: "수업 퀴즈 다시 풀기" },
+    { key: "sentence", icon: "💬", label: "문장 복습",         desc: "한국어 → 타갈로그어 문장" }
+  ];
+  function reviewMeta(key) {
+    for (var i = 0; i < REVIEW_TYPES.length; i++) if (REVIEW_TYPES[i].key === key) return REVIEW_TYPES[i];
+    return REVIEW_TYPES[0];
+  }
 
   window.LESSONS = window.LESSONS || {};
 
@@ -221,6 +234,24 @@
     });
   }
 
+  /* ---------- 다크/라이트 모드 ---------- */
+  // 적용은 <html data-theme="dark">로 하고, CSS 변수로 전 화면(수업·퀴즈·복습)에 일괄 반영됩니다.
+  function currentTheme() {
+    return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+  }
+  function applyTheme(theme) {
+    if (theme === "dark") document.documentElement.setAttribute("data-theme", "dark");
+    else document.documentElement.removeAttribute("data-theme");
+    var btn = document.getElementById("theme-btn");
+    if (btn) {
+      btn.textContent = theme === "dark" ? "☀️" : "🌙";
+      btn.setAttribute("aria-label", theme === "dark" ? "라이트모드로 전환" : "다크모드로 전환");
+      btn.setAttribute("title", theme === "dark" ? "라이트모드로 전환" : "다크모드로 전환");
+    }
+    try { localStorage.setItem(THEME_KEY, theme); } catch (e) {}
+  }
+  function toggleTheme() { applyTheme(currentTheme() === "dark" ? "light" : "dark"); }
+
   /* ---------- 라우팅 ---------- */
   function render(view) {
     stopSpeaking();
@@ -232,7 +263,7 @@
   function go(route) {
     if (route.screen === "home") render(renderHome());
     else if (route.screen === "lesson") render(renderLesson(route.day));
-    else if (route.screen === "quiz") render(renderQuiz(route.day));
+    else if (route.screen === "quiz") render(renderLessonQuiz(route.day));
   }
 
   /* ---------- 홈 화면 ---------- */
@@ -259,6 +290,22 @@
 
     head.appendChild(progressBox);
     wrap.appendChild(head);
+
+    // ----- 복습 -----
+    wrap.appendChild(el("h2", { class: "grid-title", text: "복습" }));
+    var reviewGrid = el("div", { class: "review-grid" });
+    REVIEW_TYPES.forEach(function (t) {
+      reviewGrid.appendChild(el("button", {
+        class: "review-card",
+        attrs: { type: "button" },
+        on: { click: function () { render(renderReviewScope(t.key)); } }
+      }, [
+        el("span", { class: "review-card__icon", text: t.icon }),
+        el("span", { class: "review-card__label", text: t.label }),
+        el("span", { class: "review-card__desc", text: t.desc })
+      ]));
+    });
+    wrap.appendChild(reviewGrid);
 
     wrap.appendChild(el("h2", { class: "grid-title", text: "일차 선택" }));
 
@@ -467,11 +514,10 @@
     return (answers || []).some(function (a) { return normalize(a) === u; });
   }
 
-  /* ---------- 퀴즈 화면 ---------- */
-  function renderQuiz(day) {
-    var lesson = window.LESSONS[day];
-    if (!lesson) return renderHome();
-    var questions = lesson.quiz || [];
+  /* ---------- 퀴즈 코어 (수업 퀴즈 + 복습 공용) ---------- */
+  function makeQuizScreen(config) {
+    // config: { questions, headerTitle, onComplete(grade) }
+    var questions = config.questions || [];
 
     var idx = 0;
     var userAnswers = new Array(questions.length).fill(null);
@@ -480,7 +526,7 @@
 
     var head = el("div", { class: "quiz-head" }, [
       el("span", { class: "quiz-head__count" }),
-      el("span", { class: "quiz-head__title", text: "DAY " + day + " 퀴즈" })
+      el("span", { class: "quiz-head__title", text: config.headerTitle || "퀴즈" })
     ]);
     wrap.appendChild(head);
 
@@ -590,21 +636,42 @@
     }
 
     function showResult() {
-      var g = grade();
-      recordResult(day, g.score);
-      render(renderResult(day, g));
+      config.onComplete(grade());
     }
 
     paintQuestion();
     return wrap;
   }
 
-  /* ---------- 결과 화면 ---------- */
-  function renderResult(day, g) {
+  /* ---------- 수업 퀴즈 ---------- */
+  function renderLessonQuiz(day) {
+    var lesson = window.LESSONS[day];
+    if (!lesson) return renderHome();
+    return makeQuizScreen({
+      questions: lesson.quiz || [],
+      headerTitle: "DAY " + day + " 퀴즈",
+      onComplete: function (g) {
+        recordResult(day, g.score);
+        var nextDay = day + 1, hasNext = !!window.LESSONS[nextDay];
+        render(renderResult(g, {
+          best: progress.scores[day],
+          actions: [
+            { label: "다시 풀기", kind: "ghost", onClick: function () { go({ screen: "quiz", day: day }); } },
+            { label: "홈으로", kind: "ghost", onClick: function () { go({ screen: "home" }); } },
+            { label: hasNext ? (nextDay + "일차로 →") : "다음 일차 준비 중", kind: "primary",
+              disabled: !hasNext, onClick: hasNext ? function () { go({ screen: "lesson", day: nextDay }); } : null }
+          ]
+        }));
+      }
+    });
+  }
+
+  /* ---------- 결과 화면 (수업 퀴즈 + 복습 공용) ---------- */
+  function renderResult(g, opts) {
+    opts = opts || {};
     var wrap = el("div", { class: "screen screen--result" });
 
     var emoji = g.score >= 90 ? "🎉" : g.score >= 70 ? "👍" : g.score >= 50 ? "💪" : "📚";
-    var best = progress.scores[day];
 
     var hero = el("div", { class: "card result-hero" }, [
       el("div", { class: "result-hero__emoji", text: emoji }),
@@ -612,8 +679,8 @@
       el("div", { class: "result-hero__detail",
         text: g.right + " / " + g.results.length + "문제 정답" })
     ]);
-    if (best != null) {
-      hero.appendChild(el("div", { class: "result-hero__best", text: "최고 점수: " + best + "점" }));
+    if (opts.best != null) {
+      hero.appendChild(el("div", { class: "result-hero__best", text: "최고 점수: " + opts.best + "점" }));
     }
     wrap.appendChild(hero);
 
@@ -647,37 +714,264 @@
       wrap.appendChild(item);
     });
 
-    // 액션 버튼
-    var nextDay = day + 1;
-    var hasNext = !!window.LESSONS[nextDay];
+    // 액션 버튼: ghost들은 한 줄, primary는 블록으로
+    var actions = opts.actions || [];
+    var ghosts = actions.filter(function (a) { return a.kind !== "primary"; });
+    var primaries = actions.filter(function (a) { return a.kind === "primary"; });
 
-    var row1 = el("div", { class: "btn-row", attrs: { style: "margin-top:20px" } }, [
-      el("button", {
-        class: "btn btn--ghost", attrs: { type: "button" }, text: "다시 풀기",
-        on: { click: function () { go({ screen: "quiz", day: day }); } }
-      }),
-      el("button", {
-        class: "btn btn--ghost", attrs: { type: "button" }, text: "홈으로",
-        on: { click: function () { go({ screen: "home" }); } }
-      })
-    ]);
-    wrap.appendChild(row1);
-
-    var nextBtn = el("button", {
-      class: "btn btn--primary btn--block",
-      attrs: hasNext ? { type: "button" } : { type: "button", disabled: "disabled" },
-      text: hasNext ? (nextDay + "일차로 →") : "다음 일차 준비 중",
-      on: hasNext ? { click: function () { go({ screen: "lesson", day: nextDay }); } } : null
+    if (ghosts.length) {
+      wrap.appendChild(el("div", { class: "btn-row", attrs: { style: "margin-top:20px" } },
+        ghosts.map(function (a) {
+          return el("button", {
+            class: "btn btn--ghost", attrs: { type: "button" }, text: a.label,
+            on: a.onClick ? { click: a.onClick } : null
+          });
+        })
+      ));
+    }
+    primaries.forEach(function (a) {
+      var b = el("button", {
+        class: "btn btn--primary btn--block",
+        attrs: a.disabled ? { type: "button", disabled: "disabled" } : { type: "button" },
+        text: a.label,
+        on: (a.onClick && !a.disabled) ? { click: a.onClick } : null
+      });
+      wrap.appendChild(el("div", { attrs: { style: "margin-top:10px" } }, [b]));
     });
-    wrap.appendChild(el("div", { attrs: { style: "margin-top:10px" } }, [nextBtn]));
 
     return wrap;
   }
 
-  /* ---------- 헤더 홈 버튼 ---------- */
+  /* ============================================================
+     복습 시스템 — 등록된 수업 데이터에서 퀴즈를 자동 생성
+     ============================================================ */
+  function getAvailableDays() {
+    var arr = Array.isArray(window.LESSON_DAYS) ? window.LESSON_DAYS : [];
+    return arr.filter(function (d) { return !!window.LESSONS[d]; })
+      .slice().sort(function (a, b) { return a - b; });
+  }
+
+  // 셀에서 타갈로그어만 추출 (한글 발음 괄호·슬래시 변형 제거) — 표 speakCol과 동일 규칙
+  function cleanTerm(s) {
+    return String(s == null ? "" : s).replace(/\s*\(.*?\)\s*/g, "").split("/")[0].trim();
+  }
+  // 뜻 텍스트에서 괄호 보충설명 제거
+  function cleanMeaning(s) {
+    return String(s == null ? "" : s).replace(/\s*\(.*?\)\s*/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function shuffle(arr) {
+    var a = arr.slice();
+    for (var i = a.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = a[i]; a[i] = a[j]; a[j] = t;
+    }
+    return a;
+  }
+  function sample(arr, n) { return shuffle(arr).slice(0, n); }
+  function uniqueValues(arr) {
+    var seen = {}, out = [];
+    arr.forEach(function (v) { if (!seen[v]) { seen[v] = 1; out.push(v); } });
+    return out;
+  }
+
+  // 표에서 (타갈로그어 단어, 뜻) 쌍 수집
+  function collectWords(days) {
+    var out = [], seen = {};
+    days.forEach(function (d) {
+      var L = window.LESSONS[d];
+      if (!L) return;
+      (L.sections || []).forEach(function (s) {
+        (s.blocks || []).forEach(function (b) {
+          if (b.type !== "table" || typeof b.speakCol !== "number") return;
+          var meaningIdx = -1;
+          (b.columns || []).forEach(function (c, ci) { if (/뜻/.test(c)) meaningIdx = ci; });
+          if (meaningIdx < 0) return;
+          (b.rows || []).forEach(function (row) {
+            var tl = cleanTerm(row[b.speakCol]);
+            var ko = cleanMeaning(row[meaningIdx]);
+            if (!tl || !ko || seen[tl]) return;
+            seen[tl] = 1;
+            out.push({ tl: tl, ko: ko });
+          });
+        });
+      });
+    });
+    return out;
+  }
+
+  // examples 블록에서 (타갈로그어 문장, 뜻) 쌍 수집
+  function collectSentences(days) {
+    var out = [], seen = {};
+    days.forEach(function (d) {
+      var L = window.LESSONS[d];
+      if (!L) return;
+      (L.sections || []).forEach(function (s) {
+        (s.blocks || []).forEach(function (b) {
+          if (b.type !== "examples") return;
+          (b.items || []).forEach(function (it) {
+            var tl = String(it.tl == null ? "" : it.tl).trim();
+            var ko = cleanMeaning(it.ko);
+            if (!tl || !ko || seen[tl]) return;
+            seen[tl] = 1;
+            out.push({ tl: tl, ko: ko });
+          });
+        });
+      });
+    });
+    return out;
+  }
+
+  // (보기/정답) 객관식 한 문항 생성
+  function makeChoice(qText, correct, distractPool, explain) {
+    var distract = sample(uniqueValues(distractPool.filter(function (x) { return x !== correct; })), 3);
+    var options = shuffle([correct].concat(distract));
+    return { type: "choice", q: qText, options: options, answer: options.indexOf(correct), explain: explain };
+  }
+
+  function buildWordQuiz(days) {
+    var words = collectWords(days);
+    if (words.length < 2) return [];
+    var allKo = words.map(function (w) { return w.ko; });
+    return sample(words, Math.min(REVIEW_LIMIT, words.length)).map(function (w) {
+      return makeChoice("**" + w.tl + "** 의 뜻은?", w.ko, allKo, w.tl + " = " + w.ko);
+    });
+  }
+
+  function buildSentenceQuiz(days) {
+    var sents = collectSentences(days);
+    if (sents.length < 2) return [];
+    var allTl = sents.map(function (s) { return s.tl; });
+    return sample(sents, Math.min(REVIEW_LIMIT, sents.length)).map(function (s) {
+      return makeChoice("\"" + s.ko + "\" 를 타갈로그어로?", s.tl, allTl, s.tl + " = " + s.ko);
+    });
+  }
+
+  function buildGrammarQuiz(days) {
+    var pool = [];
+    days.forEach(function (d) {
+      var L = window.LESSONS[d];
+      if (L && L.quiz) pool = pool.concat(L.quiz);
+    });
+    if (!pool.length) return [];
+    return sample(pool, Math.min(REVIEW_LIMIT, pool.length));
+  }
+
+  function buildReviewQuestions(type, days) {
+    if (type === "word") return buildWordQuiz(days);
+    if (type === "sentence") return buildSentenceQuiz(days);
+    return buildGrammarQuiz(days);
+  }
+
+  // 복습 범위 선택 화면
+  function renderReviewScope(type) {
+    var meta = reviewMeta(type);
+    var available = getAvailableDays();
+    var wrap = el("div", { class: "screen screen--scope" });
+
+    wrap.appendChild(el("button", {
+      class: "link-back", attrs: { type: "button" }, text: "← 홈으로",
+      on: { click: function () { go({ screen: "home" }); } }
+    }));
+    wrap.appendChild(el("h1", { class: "scope-title", text: meta.icon + " " + meta.label }));
+
+    if (!available.length) {
+      wrap.appendChild(el("p", { class: "scope-sub", text: "아직 등록된 수업이 없어 복습할 내용이 없어요." }));
+      return wrap;
+    }
+
+    wrap.appendChild(el("p", { class: "scope-sub", text: "복습 범위를 선택하세요." }));
+
+    // 1) 전체
+    wrap.appendChild(el("button", {
+      class: "card scope-opt", attrs: { type: "button" },
+      on: { click: function () { startReview(type, available); } }
+    }, [
+      el("span", { class: "scope-opt__title", text: "지금까지 배운 것 전체" }),
+      el("span", { class: "scope-opt__desc", text: "등록된 " + available.length + "개 수업 전체에서 출제" })
+    ]));
+
+    // 2) 수업 지정 (회차 범위)
+    var startSel = el("select", { class: "range-sel", attrs: { "aria-label": "시작 회차" } });
+    var endSel = el("select", { class: "range-sel", attrs: { "aria-label": "끝 회차" } });
+    available.forEach(function (d) {
+      startSel.appendChild(el("option", { attrs: { value: String(d) }, text: d + "회차" }));
+      endSel.appendChild(el("option", { attrs: { value: String(d) }, text: d + "회차" }));
+    });
+    startSel.value = String(available[0]);
+    endSel.value = String(available[available.length - 1]);
+
+    var custom = el("div", { class: "card scope-opt scope-opt--custom" }, [
+      el("span", { class: "scope-opt__title", text: "수업 지정해서 복습" }),
+      el("span", { class: "scope-opt__desc", text: "회차 범위를 골라 출제 (예: 1~3회차)" }),
+      el("div", { class: "range-row" }, [
+        startSel, el("span", { class: "range-tilde", text: "~" }), endSel
+      ]),
+      el("button", {
+        class: "btn btn--primary btn--block", attrs: { type: "button" }, text: "이 범위로 복습 시작",
+        on: { click: function () {
+          var s = parseInt(startSel.value, 10), e = parseInt(endSel.value, 10);
+          if (s > e) { var t = s; s = e; e = t; }
+          var sel = available.filter(function (d) { return d >= s && d <= e; });
+          startReview(type, sel);
+        } }
+      })
+    ]);
+    wrap.appendChild(custom);
+
+    return wrap;
+  }
+
+  function startReview(type, days) {
+    var meta = reviewMeta(type);
+    var questions = buildReviewQuestions(type, days);
+
+    if (!questions.length) {
+      render(renderReviewEmpty(type, days));
+      return;
+    }
+
+    var label = days.length === 1
+      ? (days[0] + "회차")
+      : (days[0] + "~" + days[days.length - 1] + "회차");
+
+    render(makeQuizScreen({
+      questions: questions,
+      headerTitle: meta.label + " · " + label,
+      onComplete: function (g) {
+        render(renderResult(g, {
+          best: null,
+          actions: [
+            { label: "다시 풀기", kind: "ghost", onClick: function () { startReview(type, days); } },
+            { label: "홈으로", kind: "ghost", onClick: function () { go({ screen: "home" }); } },
+            { label: "복습 범위 다시 선택", kind: "primary", onClick: function () { render(renderReviewScope(type)); } }
+          ]
+        }));
+      }
+    }));
+  }
+
+  function renderReviewEmpty(type, days) {
+    var meta = reviewMeta(type);
+    var wrap = el("div", { class: "screen screen--scope" });
+    wrap.appendChild(el("button", {
+      class: "link-back", attrs: { type: "button" }, text: "← 뒤로",
+      on: { click: function () { render(renderReviewScope(type)); } }
+    }));
+    wrap.appendChild(el("h1", { class: "scope-title", text: meta.icon + " " + meta.label }));
+    wrap.appendChild(el("div", { class: "card scope-empty" }, [
+      el("p", { text: "선택한 범위에는 " + meta.label.replace(" 복습", "") + "으로 낼 내용이 부족해요." }),
+      el("p", { class: "scope-sub", text: "범위를 넓히거나 다른 복습을 골라보세요." })
+    ]));
+    return wrap;
+  }
+
+  /* ---------- 헤더 버튼 (홈 / 테마) ---------- */
   document.getElementById("home-btn").addEventListener("click", function () {
     go({ screen: "home" });
   });
+  var themeBtn = document.getElementById("theme-btn");
+  if (themeBtn) themeBtn.addEventListener("click", toggleTheme);
+  applyTheme(currentTheme()); // <head> 인라인 스크립트로 정해진 테마에 아이콘 동기화
 
   /* ---------- 부팅 ---------- */
   var days = Array.isArray(window.LESSON_DAYS) ? window.LESSON_DAYS.slice() : [];
