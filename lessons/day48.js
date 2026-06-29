@@ -31,7 +31,7 @@ window.LESSONS[48] = {
       ]
     },
     {
-      title: "3課시. 간판·표지·메뉴 — 여행지 읽기 (읽기)",
+      title: "3교시. 간판·표지·메뉴 — 여행지 읽기 (읽기)",
       blocks: [
         { type: "p", text: "37·48일차 읽기가 여행지에서 빛납니다. 여행 단골 표지:" },
         { type: "table", columns: ["표지/단어", "뜻"], speakCol: 0, rows: [
